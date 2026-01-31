@@ -4,8 +4,13 @@
     import { onMount } from 'svelte';
     import mermaid from 'mermaid';
     import { marked } from 'marked';
+    import { jsPDF } from 'jspdf';
 
     export let form: any;
+
+    let mdHover = false;
+    let pdfHover = false;
+    let txtHover = false;
 
     onMount(() => {
         mermaid.initialize({ 
@@ -15,25 +20,47 @@
         });
     });
 
-    /**
-     * Fixes the "any" type error and handles the Promise returned by marked.parse
-     */
     async function formatOutput(text: string): Promise<string> {
         if (!text) return '';
-        
-        // marked.parse is now async in newer versions
         const html = await marked.parse(text);
-        
-        // This converts standard markdown code blocks into Mermaid-ready divs
         return html.replace(
             /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g, 
             '<pre class="mermaid">$1</pre>'
         );
     }
 
-    /**
-     * Triggers Mermaid to draw charts after the HTML is added to the page
-     */
+    // Export Logic
+    const downloadFile = async (type: 'md' | 'pdf' | 'txt') => {
+        const content = form?.analysis;
+        if (!content) return;
+
+        const filename = `MorphAI-Analysis-${Date.now()}`;
+
+        if (type === 'pdf') {
+            const doc = new jsPDF();
+            const margin = 10;
+            const pageWidth = doc.internal.pageSize.getWidth() - (margin * 2);
+            
+            doc.setFont("helvetica", "bold");
+            doc.text("Morph.ai Analysis Report", margin, 20);
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(10);
+            
+            const splitText = doc.splitTextToSize(content, pageWidth);
+            doc.text(splitText, margin, 30);
+            doc.save(`${filename}.pdf`);
+        } else {
+            const mimeType = type === 'md' ? 'text/markdown' : 'text/plain';
+            const blob = new Blob([content], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `${filename}.${type}`;
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+    };
+
     $: if (form?.success) {
         setTimeout(async () => {
             await mermaid.run({
@@ -58,7 +85,6 @@
             use:enhance={() => {
                 $progress.loading = true;
                 $progress.status = "Analyzing repository structure...";
-                
                 return async ({ update }) => {
                     await update();
                     $progress.loading = false;
@@ -79,6 +105,32 @@
                 {$progress.loading ? 'WORKING...' : 'MORPH'}
             </button>
         </form>
+
+        {#if form?.success && !$progress.loading}
+            <div class="flex items-center gap-4 mb-6 p-4 bg-slate-900/50 border border-slate-800 rounded-xl animate-in fade-in zoom-in duration-500">
+                <span class="text-xs font-bold text-slate-500 uppercase tracking-widest">Export Intelligence:</span>
+                <div class="flex gap-2">
+                    <button
+                        on:click={() => downloadFile('md')}
+                        class="export-btn font-bold px-4 py-2 rounded-lg text-blue-700 transition-all duration-200 hover:underline"
+                    >
+                        Markdown
+                    </button>
+                    <button
+                        on:click={() => downloadFile('pdf')}
+                        class="export-btn font-bold px-4 py-2 rounded-lg text-blue-700 transition-all duration-200 hover:underline"
+                    >
+                        PDF Report
+                    </button>
+                    <button
+                        on:click={() => downloadFile('txt')}
+                        class="export-btn font-bold px-4 py-2 rounded-lg text-blue-700 transition-all duration-200 hover:underline"
+                    >
+                        Plain Text
+                    </button>
+                </div>
+            </div>
+        {/if}
 
         {#if $progress.loading}
             <div class="mb-10 animate-in fade-in">
@@ -114,7 +166,8 @@
 </main>
 
 <style>
-    /* Custom animation for the sleek progress bar */
+    /* Removed .export-btn because @apply was failing */
+    
     @keyframes progress-loading {
         0% { transform: translateX(-100%); }
         100% { transform: translateX(200%); }
@@ -125,7 +178,6 @@
         animation: progress-loading 1.5s infinite linear;
     }
 
-    /* Target Mermaid diagrams specifically */
     :global(.mermaid) {
         background: #0f172a !important;
         padding: 2rem;
