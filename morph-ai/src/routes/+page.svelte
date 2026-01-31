@@ -76,7 +76,7 @@
             <h1 class="text-5xl font-black text-white italic tracking-tighter uppercase">
                 Morph<span class="text-blue-500">.ai</span>
             </h1>
-            <p class="text-slate-500 text-sm mt-2">v1.0 // ARCHITECTURAL INTELLIGENCE ENGINE</p>
+            <p class="text-slate-500 text-sm mt-2">v1.1 // ARCHITECTURAL INTELLIGENCE ENGINE</p>
         </header>
 
         <form 
