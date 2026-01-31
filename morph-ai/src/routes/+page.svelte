@@ -2,13 +2,14 @@
     import { enhance } from '$app/forms';
     import { onMount } from 'svelte';
     import mermaid from 'mermaid';
+    // --- STEP 3: IMPORT THE STORE ---
+    import { progress } from '$lib/stores/progress';
 
-    export let form; // Data coming back from Gemini
-    let loading = false;
+    export let form;
 
-    // This runs every time the AI returns a result
+    // We no longer need "let loading = false" because we use $progress.loading
+
     $: if (form?.success) {
-        // We wait a split second for the text to appear, then draw the chart
         setTimeout(() => {
             mermaid.init(undefined, document.querySelectorAll('.mermaid'));
         }, 100);
@@ -26,20 +27,34 @@
             <p class="text-slate-400">Codebase intelligence dashboard.</p>
         </header>
 
-        <form method="POST" action="?/analyzeRepo" use:enhance={() => {
-            loading = true;
-            return async ({ update }) => {
-                await update();
-                loading = false;
-            };
-        }} class="flex gap-4">
+        <form 
+            method="POST" 
+            action="?/analyzeRepo" 
+            use:enhance={() => {
+                // Set the store to loading
+                $progress.loading = true;
+                $progress.status = "Morphing...";
+
+                return async ({ update }) => {
+                    await update();
+                    // Set the store to idle when finished
+                    $progress.loading = false;
+                    $progress.status = "Idle";
+                };
+            }} 
+            class="flex gap-4"
+        >
             <input 
                 name="repoUrl" 
                 placeholder="https://github.com/..." 
                 class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-4 focus:ring-2 focus:ring-blue-500 outline-none"
             />
-            <button class="bg-blue-600 px-8 rounded-lg font-bold hover:bg-blue-500 transition-colors disabled:opacity-50">
-                {loading ? 'Morphing...' : 'Morph'}
+            
+            <button 
+                disabled={$progress.loading}
+                class="bg-blue-600 px-8 rounded-lg font-bold hover:bg-blue-500 transition-colors disabled:opacity-50"
+            >
+                {$progress.loading ? $progress.status : 'Morph'}
             </button>
         </form>
 
