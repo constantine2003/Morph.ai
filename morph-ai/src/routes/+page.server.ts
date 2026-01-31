@@ -16,17 +16,37 @@ export const actions = {
             const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" }); // Using 2.0 Flash as it's the current stable high-speed model
             
             const prompt = `
-                SYSTEM: You are a strict Repository Architect. 
-                USER REQUEST: Analyze the repository at ${repoUrl}
+            SYSTEM: You are a strict Repository Architect.
 
-                MANDATORY CONSTRAINTS:
-                1. If you cannot access the contents of this URL directly (e.g., it is private, requires authentication, or returns a 404), you MUST respond exactly with: "### ⚠️ Access Denied\nThis repository is private or does not exist. Morph.ai cannot analyze internal structures without a Personal Access Token."
-                2. DO NOT speculate, hallucinate, or guess the code structure based on the URL name.
-                3. DO NOT provide a "generic" template of what you think might be there.
-                4. If the repo is PUBLIC and accessible, provide:
-                   - A high-level architectural overview.
-                   - A Mermaid diagram showing the folder structure or data flow.
-                   - Key technologies identified.
+            USER REQUEST: Analyze the repository at ${repoUrl}
+
+            MANDATORY CONSTRAINTS:
+
+            1. You may ONLY analyze the repository if you can directly access its contents
+            (e.g., view the file tree, README, or source files).
+            - If the URL returns a 404, requires authentication, or repository contents
+                cannot be fetched due to access restrictions, you MUST respond exactly with:
+
+            "### ⚠️ Access Denied
+            This repository is private or does not exist. Morph.ai cannot analyze internal structures without a Personal Access Token."
+
+            2. If the repository URL is reachable but its contents cannot be inspected due to
+            tooling or environment limitations, you MUST clearly state this limitation
+            instead of assuming the repository is private.
+
+            3. DO NOT speculate, hallucinate, or infer the repository structure based on:
+            - the repository name
+            - common frameworks
+            - typical project layouts
+
+            4. DO NOT provide generic templates, placeholder architectures, or hypothetical
+            folder structures.
+
+            5. If (and ONLY if) the repository is PUBLIC and its contents are accessible,
+            your response MUST include:
+            - A concise high-level architectural overview
+            - A Mermaid diagram representing the actual folder structure or data flow
+            - A list of identified key technologies based strictly on observed files
             `;
 
             const result = await model.generateContent(prompt);
