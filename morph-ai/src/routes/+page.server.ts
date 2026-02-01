@@ -46,7 +46,8 @@ export const actions = {
                 prompt =    `You are an expert code architect. Here is the README and file tree for a repository at ${repoUrl}.
                             README:\n\n${readme ? readme.substring(0, 8000) : 'No README found.'}
                             File Tree (truncated to 1000 files):\n\n${fileTree ? fileTree.substring(0, 8000) : 'No file tree found.'}
-                            Please provide a concise, technical breakdown of the repository's structure, purpose, and any notable technologies or patterns. Do not speculate beyond the provided data. If you are unsure, say so.`;
+                            Please provide a concise, technical breakdown of the repository's structure, purpose, and any notable technologies or patterns. Do not speculate beyond the provided data. If you are unsure, say so.
+                            If the repository appears to be a joke, empty, or not a real project, state this clearly in your analysis.`;
             } else {
                 prompt = `You are an expert code architect. I will provide a URL: ${repoUrl}. If you cannot access the contents of this URL directly, DO NOT speculate or invent details. If you do not have access, simply state: "The repository is private or inaccessible." If you CAN see it, provide a concise, technical breakdown of the repository's structure, purpose, and any notable technologies or patterns.`;
             }

@@ -105,6 +105,9 @@
             <p class="text-slate-500 text-sm mt-2">v1.0-alpha // ARCHITECTURAL INTELLIGENCE ENGINE</p>
         </header>
 
+        <div class="mb-4 p-4 bg-yellow-900/30 border border-yellow-700/50 text-yellow-300 rounded-xl text-sm">
+            <strong>Note:</strong> The AI may be prone to hallucination or making up details. For best results, please provide a public repository and always double-check the analysis output.
+        </div>
         <form 
             method="POST" 
             action="?/analyzeRepo" 
