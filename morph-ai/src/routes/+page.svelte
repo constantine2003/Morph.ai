@@ -102,7 +102,7 @@
             <h1 class="text-5xl font-black text-white italic tracking-tighter uppercase">
                 Morph<span class="text-blue-500">.ai</span>
             </h1>
-            <p class="text-slate-500 text-sm mt-2">v1.0-alpha // ARCHITECTURAL INTELLIGENCE ENGINE</p>
+            <p class="text-slate-500 text-sm mt-2">v1.0.0-rc1. // ARCHITECTURAL INTELLIGENCE ENGINE</p>
         </header>
 
         <div class="mb-4 p-4 bg-yellow-900/30 border border-yellow-700/50 text-yellow-300 rounded-xl text-sm">
