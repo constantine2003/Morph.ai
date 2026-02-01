@@ -40,18 +40,44 @@
             const doc = new jsPDF();
             const margin = 10;
             const pageWidth = doc.internal.pageSize.getWidth() - (margin * 2);
-            
+            const pageHeight = doc.internal.pageSize.getHeight();
+
             doc.setFont("helvetica", "bold");
             doc.text("Morph.ai Analysis Report", margin, 20);
             doc.setFont("helvetica", "normal");
             doc.setFontSize(10);
-            
-            const splitText = doc.splitTextToSize(content, pageWidth);
-            doc.text(splitText, margin, 30);
+
+            // Convert Markdown to HTML, then to plain text for PDF
+            const html = await marked.parse(content);
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = html;
+            const textContent = tempDiv.innerText;
+
+            const splitText = doc.splitTextToSize(textContent, pageWidth);
+            let y = 30;
+            const lineHeight = 7; // Approximate line height in jsPDF units
+            for (let i = 0; i < splitText.length; i++) {
+                if (y + lineHeight > pageHeight - margin) {
+                    doc.addPage();
+                    y = margin;
+                }
+                doc.text(splitText[i], margin, y);
+                y += lineHeight;
+            }
             doc.save(`${filename}.pdf`);
         } else {
-            const mimeType = type === 'md' ? 'text/markdown' : 'text/plain';
-            const blob = new Blob([content], { type: mimeType });
+            let exportContent = content;
+            let mimeType = 'text/plain';
+            if (type === 'md') {
+                mimeType = 'text/markdown';
+            } else if (type === 'txt') {
+                // Convert Markdown to plain text for .txt export
+                const html = await marked.parse(content);
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = html;
+                exportContent = tempDiv.innerText;
+            }
+            const blob = new Blob([exportContent], { type: mimeType });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
@@ -76,9 +102,12 @@
             <h1 class="text-5xl font-black text-white italic tracking-tighter uppercase">
                 Morph<span class="text-blue-500">.ai</span>
             </h1>
-            <p class="text-slate-500 text-sm mt-2">v1.1 // ARCHITECTURAL INTELLIGENCE ENGINE</p>
+            <p class="text-slate-500 text-sm mt-2">v1.0.0-rc1. // ARCHITECTURAL INTELLIGENCE ENGINE</p>
         </header>
 
+        <div class="mb-4 p-4 bg-yellow-900/30 border border-yellow-700/50 text-yellow-300 rounded-xl text-sm">
+            <strong>Note:</strong> The AI may be prone to hallucination or making up details. For best results, please provide a public repository and always double-check the analysis output.
+        </div>
         <form 
             method="POST" 
             action="?/analyzeRepo" 
