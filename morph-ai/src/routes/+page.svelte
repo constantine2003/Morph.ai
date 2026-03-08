@@ -1,219 +1,645 @@
 <script lang="ts">
     import { enhance } from '$app/forms';
     import { progress } from '$lib/stores/progress';
-    import { onMount } from 'svelte';
+    import { onMount, tick } from 'svelte';
     import mermaid from 'mermaid';
     import { marked } from 'marked';
-    import { jsPDF } from 'jspdf';
 
     export let form: any;
 
-    let mdHover = false;
-    let pdfHover = false;
-    let txtHover = false;
+    let copied = false;
+    let repoInputValue = '';
+    let focused = false;
+
+    // Zoom modal
+    let zoomOpen = false;
+    let zoomSvgHtml = '';
+    let zoomScale = 1;
+    let zoomX = 0;
+    let zoomY = 0;
+    let isPanning = false;
+    let panStart = { x: 0, y: 0 };
+
+    function openZoom(svgHtml: string) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = svgHtml;
+        const svg = tmp.querySelector('svg');
+        if (svg) {
+            svg.removeAttribute('width');
+            svg.removeAttribute('height');
+            svg.removeAttribute('style');
+            if (!svg.getAttribute('viewBox')) {
+                svg.setAttribute('viewBox', '0 0 800 400');
+            }
+        }
+        zoomSvgHtml = tmp.innerHTML;
+        zoomScale = 1; zoomX = 0; zoomY = 0;
+        zoomOpen = true;
+    }
+    function closeZoom() { zoomOpen = false; }
+    function onZoomWheel(e: WheelEvent) {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? 0.9 : 1.1;
+        zoomScale = Math.min(Math.max(zoomScale * delta, 0.25), 10);
+    }
+    function onPanStart(e: MouseEvent) {
+        if (e.button !== 0) return;
+        isPanning = true;
+        panStart = { x: e.clientX - zoomX, y: e.clientY - zoomY };
+    }
+    function onPanMove(e: MouseEvent) {
+        if (!isPanning) return;
+        zoomX = e.clientX - panStart.x;
+        zoomY = e.clientY - panStart.y;
+    }
+    function onPanEnd() { isPanning = false; }
+    function resetZoom() { zoomScale = 1; zoomX = 0; zoomY = 0; }
 
     onMount(() => {
-        mermaid.initialize({ 
-            startOnLoad: false, 
-            theme: 'dark',
-            securityLevel: 'loose'
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: 'base',
+            themeVariables: {
+                primaryColor: '#2d2654',
+                primaryTextColor: '#e8e6ff',
+                primaryBorderColor: '#7c6ee0',
+                lineColor: '#6d5acd',
+                secondaryColor: '#1e1a3a',
+                tertiaryColor: '#252048',
+                background: '#181530',
+                mainBkg: '#2d2654',
+                nodeBorder: '#7c6ee0',
+                clusterBkg: '#1e1a3a',
+                titleColor: '#e8e6ff',
+                edgeLabelBackground: '#2d2654',
+                fontFamily: 'Geist, Inter, system-ui, sans-serif',
+                fontSize: '14px',
+            },
+            securityLevel: 'loose',
+            flowchart: { htmlLabels: false, curve: 'basis' },
         });
     });
 
+    function sanitizeMermaid(raw: string): string {
+        return raw
+            .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+            .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+            .replace(/<[^>]*>/g, '')
+            .replace(/\["([^"]+)"\]/g, '[$1]')
+            // Clean content inside node labels: strip parens, commas, special chars
+            .replace(/\[([^\]]+)\]/g, (_: string, label: string) => {
+                const clean = label
+                    .replace(/\(([^)]*)\)/g, ' $1')   // (foo) -> foo
+                    .replace(/e\.g\.,?\s*/g, '')        // remove "e.g.,"
+                    .replace(/[,;:]/g, ' ')             // commas -> spaces
+                    .replace(/\s{2,}/g, ' ')            // collapse spaces
+                    .trim();
+                return `[${clean}]`;
+            })
+            .split('\n').map((l: string) => l.trimEnd()).join('\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+    }
+
+    async function renderMermaid() {
+        await tick();
+        await new Promise(r => setTimeout(r, 150));
+        const nodes = Array.from(document.querySelectorAll<HTMLElement>('.mermaid-pending'));
+        for (const node of nodes) {
+            const raw = node.getAttribute('data-diagram') || '';
+            const cleaned = sanitizeMermaid(raw);
+            try {
+                const id = `mmd-${Math.random().toString(36).slice(2, 9)}`;
+                const { svg } = await mermaid.render(id, cleaned);
+                const tmp = document.createElement('div');
+                tmp.innerHTML = svg;
+                const svgEl = tmp.querySelector('svg');
+                if (svgEl) {
+                    const vb = svgEl.getAttribute('viewBox');
+                    svgEl.removeAttribute('width');
+                    svgEl.removeAttribute('height');
+                    svgEl.style.width = '100%';
+                    svgEl.style.height = 'auto';
+                    if (vb) svgEl.setAttribute('viewBox', vb);
+                }
+                node.innerHTML = tmp.innerHTML;
+                node.classList.remove('mermaid-pending');
+                node.classList.add('mermaid-ok');
+                node.style.cursor = 'zoom-in';
+                node.title = 'Click to expand';
+                node.addEventListener('click', () => openZoom(node.innerHTML));
+            } catch (e) {
+                node.classList.remove('mermaid-pending');
+                node.classList.add('mermaid-failed');
+                node.innerHTML = `<div class="mermaid-err"><p>⚠ Could not render diagram</p><pre>${cleaned.replace(/</g, '&lt;')}</pre></div>`;
+            }
+        }
+    }
+
     async function formatOutput(text: string): Promise<string> {
         if (!text) return '';
-        const html = await marked.parse(text);
+        const html = await marked.parse(text, { breaks: false });
         return html.replace(
-            /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g, 
-            '<pre class="mermaid">$1</pre>'
+            /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g,
+            (_, code) => {
+                const escaped = code.replace(/"/g, '&quot;');
+                return `<div class="mermaid-pending mermaid-wrap" data-diagram="${escaped}"><span class="mermaid-loading">Rendering diagram…</span></div>`;
+            }
         );
     }
 
-    // Export Logic
+    async function copyToClipboard() {
+        if (!form?.analysis) return;
+        await navigator.clipboard.writeText(form.analysis);
+        copied = true;
+        setTimeout(() => (copied = false), 2000);
+    }
+
     const downloadFile = async (type: 'md' | 'pdf' | 'txt') => {
         const content = form?.analysis;
         if (!content) return;
-
-        const filename = `MorphAI-Analysis-${Date.now()}`;
-
+        const filename = `MorphAI-${Date.now()}`;
         if (type === 'pdf') {
-            const doc = new jsPDF();
-            const margin = 10;
-            const pageWidth = doc.internal.pageSize.getWidth() - (margin * 2);
+            const { jsPDF } = await import('jspdf');
+            const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+            const margin = 15;
+            const pageWidth = doc.internal.pageSize.getWidth() - margin * 2;
             const pageHeight = doc.internal.pageSize.getHeight();
-
-            doc.setFont("helvetica", "bold");
-            doc.text("Morph.ai Analysis Report", margin, 20);
-            doc.setFont("helvetica", "normal");
-            doc.setFontSize(10);
-
-            // Convert Markdown to HTML, then to plain text for PDF
-            const html = await marked.parse(content);
+            doc.setFillColor(14, 14, 26);
+            doc.rect(0, 0, doc.internal.pageSize.getWidth(), pageHeight, 'F');
+            doc.setTextColor(109, 90, 205); doc.setFontSize(20); doc.setFont('helvetica', 'bold');
+            doc.text('Morph.ai', margin, 18);
+            doc.setTextColor(100, 95, 140); doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+            doc.text('Architectural Intelligence', margin, 25);
+            doc.text(`${new Date().toUTCString()}`, margin, 31);
+            doc.setDrawColor(40, 35, 65);
+            doc.line(margin, 35, doc.internal.pageSize.getWidth() - margin, 35);
             const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = html;
+            tempDiv.innerHTML = await marked.parse(content);
             const textContent = tempDiv.innerText;
-
-            const splitText = doc.splitTextToSize(textContent, pageWidth);
-            let y = 30;
-            const lineHeight = 7; // Approximate line height in jsPDF units
-            for (let i = 0; i < splitText.length; i++) {
-                if (y + lineHeight > pageHeight - margin) {
+            doc.setTextColor(210, 205, 245); doc.setFontSize(9.5);
+            const lines = doc.splitTextToSize(textContent, pageWidth);
+            let y = 43;
+            for (const line of lines) {
+                if (y > pageHeight - margin) {
                     doc.addPage();
+                    doc.setFillColor(14, 14, 26);
+                    doc.rect(0, 0, doc.internal.pageSize.getWidth(), pageHeight, 'F');
                     y = margin;
                 }
-                doc.text(splitText[i], margin, y);
-                y += lineHeight;
+                if (/^[🧠⚙️🏗️🔄📁🔐⚠️##]/.test(line)) {
+                    doc.setFont('helvetica', 'bold'); doc.setTextColor(109, 90, 205);
+                } else {
+                    doc.setFont('helvetica', 'normal'); doc.setTextColor(210, 205, 245);
+                }
+                doc.text(line, margin, y); y += 5.5;
             }
             doc.save(`${filename}.pdf`);
         } else {
             let exportContent = content;
-            let mimeType = 'text/plain';
-            if (type === 'md') {
-                mimeType = 'text/markdown';
-            } else if (type === 'txt') {
-                // Convert Markdown to plain text for .txt export
-                const html = await marked.parse(content);
+            const mimeType = type === 'md' ? 'text/markdown' : 'text/plain';
+            if (type === 'txt') {
                 const tempDiv = document.createElement('div');
-                tempDiv.innerHTML = html;
+                tempDiv.innerHTML = await marked.parse(content);
                 exportContent = tempDiv.innerText;
             }
             const blob = new Blob([exportContent], { type: mimeType });
             const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = `${filename}.${type}`;
-            link.click();
+            const a = document.createElement('a');
+            a.href = url; a.download = `${filename}.${type}`; a.click();
             URL.revokeObjectURL(url);
         }
     };
 
-    $: if (form?.success) {
-        setTimeout(async () => {
-            await mermaid.run({
-                nodes: document.querySelectorAll('.mermaid')
-            });
-        }, 300);
+    $: if (form?.success) renderMermaid();
+
+    const statusMessages = [
+        'Fetching repository…',
+        'Reading file tree…',
+        'Identifying stack…',
+        'Mapping architecture…',
+        'Writing report…',
+        'Almost done…',
+    ];
+    let statusIndex = 0;
+    let statusInterval: ReturnType<typeof setInterval> | null = null;
+    let wasLoading = false;
+
+    $: {
+        if ($progress.loading && !wasLoading) {
+            wasLoading = true;
+            statusIndex = 0;
+            $progress.status = statusMessages[0];
+            if (statusInterval) clearInterval(statusInterval);
+            statusInterval = setInterval(() => {
+                statusIndex = Math.min(statusIndex + 1, statusMessages.length - 1);
+                $progress.status = statusMessages[statusIndex];
+            }, 1800);
+        } else if (!$progress.loading && wasLoading) {
+            wasLoading = false;
+            if (statusInterval) { clearInterval(statusInterval); statusInterval = null; }
+        }
     }
 </script>
 
-<main class="min-h-screen bg-slate-950 text-slate-200 p-8 font-mono">
-    <div class="max-w-4xl mx-auto">
-        <header class="mb-12 border-l-4 border-blue-500 pl-6">
-            <h1 class="text-5xl font-black text-white italic tracking-tighter uppercase">
-                Morph<span class="text-blue-500">.ai</span>
-            </h1>
-            <p class="text-slate-500 text-sm mt-2">v1.0.0-rc1. // ARCHITECTURAL INTELLIGENCE ENGINE</p>
-        </header>
+<svelte:head>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</svelte:head>
 
-        <div class="mb-4 p-4 bg-yellow-900/30 border border-yellow-700/50 text-yellow-300 rounded-xl text-sm">
-            <strong>Note:</strong> The AI may be prone to hallucination or making up details. For best results, please provide a public repository and always double-check the analysis output.
-        </div>
-        <form 
-            method="POST" 
-            action="?/analyzeRepo" 
+<div class="page">
+    <div class="bg-glow" aria-hidden="true"></div>
+    <div class="container">
+
+        <nav>
+            <div class="nav-brand">
+                <span class="nav-logo">M</span>
+                <span class="nav-name">morph<span class="nav-dot">.</span>ai</span>
+            </div>
+            <div class="nav-badge">
+                <span class="badge-dot" class:pulse={$progress.loading}></span>
+                <span>{$progress.loading ? 'Analyzing' : 'Ready'}</span>
+            </div>
+        </nav>
+
+        <section class="hero">
+            <div class="hero-eyebrow">Architectural Intelligence</div>
+            <h1 class="hero-title">
+                Understand any<br/>
+                <span class="hero-gradient">codebase instantly</span>
+            </h1>
+            <p class="hero-sub">
+                Paste a GitHub URL. Get a complete architectural breakdown —<br class="hero-br"/>
+                stack, structure, data flow, and patterns.
+            </p>
+        </section>
+
+        <form
+            method="POST"
+            action="?/analyzeRepo"
             use:enhance={() => {
                 $progress.loading = true;
-                $progress.status = "Analyzing repository structure...";
-                return async ({ update }) => {
-                    await update();
-                    $progress.loading = false;
-                };
-            }} 
-            class="flex gap-3 mb-6"
+                return async ({ update }) => { await update(); $progress.loading = false; };
+            }}
+            class="search-form"
         >
-            <input 
-                name="repoUrl" 
-                placeholder="https://github.com/username/repo" 
-                class="flex-1 bg-slate-900 border border-slate-800 rounded-xl p-4 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                required
-            />
-            <button 
-                disabled={$progress.loading} 
-                class="bg-blue-600 px-10 rounded-xl font-bold hover:bg-blue-500 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-                {$progress.loading ? 'WORKING...' : 'MORPH'}
+            <div class="search-box" class:focused>
+                <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
+                </svg>
+                <input
+                    name="repoUrl"
+                    bind:value={repoInputValue}
+                    on:focus={() => focused = true}
+                    on:blur={() => focused = false}
+                    placeholder="github.com/username/repository"
+                    autocomplete="off"
+                    spellcheck="false"
+                    required
+                />
+                {#if repoInputValue}
+                    <button type="button" class="clear-btn" on:click={() => repoInputValue = ''}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                {/if}
+            </div>
+            <button type="submit" class="analyze-btn" disabled={$progress.loading}>
+                {#if $progress.loading}
+                    <span class="spin-ring"></span>
+                {:else}
+                    <span>Analyze</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <line x1="5" y1="12" x2="19" y2="12"/>
+                        <polyline points="12 5 19 12 12 19"/>
+                    </svg>
+                {/if}
             </button>
         </form>
 
-        {#if form?.success && !$progress.loading}
-            <div class="flex items-center gap-4 mb-6 p-4 bg-slate-900/50 border border-slate-800 rounded-xl animate-in fade-in zoom-in duration-500">
-                <span class="text-xs font-bold text-slate-500 uppercase tracking-widest">Export Intelligence:</span>
-                <div class="flex gap-2">
-                    <button
-                        on:click={() => downloadFile('md')}
-                        class="export-btn font-bold px-4 py-2 rounded-lg text-blue-700 transition-all duration-200 hover:underline"
-                    >
-                        Markdown
-                    </button>
-                    <button
-                        on:click={() => downloadFile('pdf')}
-                        class="export-btn font-bold px-4 py-2 rounded-lg text-blue-700 transition-all duration-200 hover:underline"
-                    >
-                        PDF Report
-                    </button>
-                    <button
-                        on:click={() => downloadFile('txt')}
-                        class="export-btn font-bold px-4 py-2 rounded-lg text-blue-700 transition-all duration-200 hover:underline"
-                    >
-                        Plain Text
-                    </button>
-                </div>
-            </div>
-        {/if}
+        <p class="disclaimer">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            AI outputs may be inaccurate. Always verify with your codebase.
+        </p>
 
         {#if $progress.loading}
-            <div class="mb-10 animate-in fade-in">
-                <div class="flex justify-between text-xs text-blue-500 mb-2 font-bold uppercase tracking-widest">
-                    <span>{$progress.status}</span>
-                    <span>System Active</span>
+            <div class="loading-card">
+                <div class="loading-top">
+                    <div class="loading-steps">
+                        {#each statusMessages as msg, i}
+                            <div class="loading-step" class:active={i === statusIndex} class:done={i < statusIndex}>
+                                <span class="step-indicator">
+                                    {#if i < statusIndex}
+                                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                                    {:else if i === statusIndex}
+                                        <span class="step-dot-pulse"></span>
+                                    {:else}
+                                        <span class="step-dot-idle"></span>
+                                    {/if}
+                                </span>
+                                <span class="step-label">{msg}</span>
+                            </div>
+                        {/each}
+                    </div>
+                    <div class="loading-visual">
+                        <div class="loading-ring"></div>
+                        <div class="loading-ring ring-2"></div>
+                        <div class="loading-ring ring-3"></div>
+                    </div>
                 </div>
-                <div class="w-full bg-slate-900 h-1 overflow-hidden rounded-full">
-                    <div class="bg-blue-500 h-full animate-progress-bar"></div>
+                <div class="loading-bar-track">
+                    <div class="loading-bar-fill"></div>
                 </div>
             </div>
         {/if}
 
-        {#if form?.success}
-            <div class="space-y-6 animate-in slide-in-from-bottom-4 duration-700">
-                <div class="p-8 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl prose prose-invert prose-blue max-w-none">
-                    {#await formatOutput(form.analysis)}
-                        <div class="flex items-center gap-3 text-slate-500">
-                            <div class="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                            <p>Formatting intelligence report...</p>
-                        </div>
-                    {:then cleanHtml}
-                        {@html cleanHtml}
-                    {/await}
-                </div>
-            </div>
-        {:else if form?.error}
-            <div class="p-4 bg-red-950/30 border border-red-900/50 text-red-400 rounded-xl text-sm">
-                <strong>Error:</strong> {form.error}
+        {#if form?.error}
+            <div class="error-card">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <span>{form.error}</span>
             </div>
         {/if}
+
+        {#if form?.success && !$progress.loading}
+            <div class="toolbar">
+                <div class="toolbar-left">
+                    <span class="toolbar-label">Report</span>
+                    {#if form?.hasGitHubData}
+                        <span class="chip chip-green">
+                            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                            GitHub data
+                        </span>
+                    {:else}
+                        <span class="chip chip-yellow">URL only</span>
+                    {/if}
+                </div>
+                <div class="toolbar-right">
+                    <button class="tool-btn" on:click={copyToClipboard}>
+                        {#if copied}
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                            Copied
+                        {:else}
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            Copy
+                        {/if}
+                    </button>
+                    <div class="divider-v"></div>
+                    <button class="tool-btn" on:click={() => downloadFile('md')}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        .md
+                    </button>
+                    <button class="tool-btn" on:click={() => downloadFile('pdf')}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        .pdf
+                    </button>
+                    <button class="tool-btn" on:click={() => downloadFile('txt')}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        .txt
+                    </button>
+                </div>
+            </div>
+
+            <div class="report">
+                {#await formatOutput(form.analysis)}
+                    <div class="format-spinner"><span class="spin-ring"></span></div>
+                {:then cleanHtml}
+                    <div class="prose">{@html cleanHtml}</div>
+                {/await}
+            </div>
+
+        {:else if !form?.error && !$progress.loading}
+            <div class="features">
+                {#each [
+                    { icon: '⬡', title: 'Architecture map', desc: 'Visual data flow diagrams generated automatically from your repo structure.' },
+                    { icon: '◈', title: 'Stack detection', desc: 'Identifies every framework, library, and tool in use across the codebase.' },
+                    { icon: '◎', title: 'Pattern analysis', desc: 'Surfaces design patterns, anti-patterns, and structural observations.' }
+                ] as f}
+                    <div class="feature-card">
+                        <div class="feature-icon">{f.icon}</div>
+                        <div class="feature-title">{f.title}</div>
+                        <div class="feature-desc">{f.desc}</div>
+                    </div>
+                {/each}
+            </div>
+        {/if}
+
+        <!-- Zoom modal -->
+        {#if zoomOpen}
+            <div
+                class="zoom-backdrop"
+                on:click={closeZoom}
+                on:keydown={(e) => e.key === 'Escape' && closeZoom()}
+                role="dialog"
+                aria-modal="true"
+                tabindex="-1"
+            >
+                <div class="zoom-toolbar" on:click|stopPropagation>
+                    <span class="zoom-label">Diagram</span>
+                    <div class="zoom-controls">
+                        <button class="zoom-ctrl-btn" on:click={() => { zoomScale = Math.min(zoomScale * 1.25, 10); }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        </button>
+                        <span class="zoom-pct">{Math.round(zoomScale * 100)}%</span>
+                        <button class="zoom-ctrl-btn" on:click={() => { zoomScale = Math.max(zoomScale * 0.8, 0.25); }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        </button>
+                        <button class="zoom-ctrl-btn reset" on:click={resetZoom} title="Reset">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                        </button>
+                        <button class="zoom-ctrl-btn close" on:click={closeZoom}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <!-- svelte-ignore a11y-no-static-element-interactions -->
+                <div
+                    class="zoom-stage"
+                    on:click|stopPropagation
+                    on:wheel|nonpassive={onZoomWheel}
+                    on:mousedown={onPanStart}
+                    on:mousemove={onPanMove}
+                    on:mouseup={onPanEnd}
+                    on:mouseleave={onPanEnd}
+                    style="cursor: {isPanning ? 'grabbing' : 'grab'}"
+                >
+                    <div
+                        class="zoom-content"
+                        style="transform: translate({zoomX}px, {zoomY}px) scale({zoomScale}); transform-origin: center center;"
+                    >
+                        {@html zoomSvgHtml}
+                    </div>
+                </div>
+                <p class="zoom-hint">Scroll to zoom · Drag to pan · Click outside to close</p>
+            </div>
+        {/if}
+
     </div>
-</main>
+</div>
 
 <style>
-    /* Removed .export-btn because @apply was failing */
-    
-    @keyframes progress-loading {
-        0% { transform: translateX(-100%); }
-        100% { transform: translateX(200%); }
-    }
-    
-    .animate-progress-bar {
-        width: 40%;
-        animation: progress-loading 1.5s infinite linear;
+    :global(*, *::before, *::after) { box-sizing: border-box; margin: 0; padding: 0; }
+    :global(body) { background: #0e0e16; }
+
+    .page {
+        min-height: 100vh;
+        background: #0e0e16;
+        color: #c9c7e8;
+        font-family: 'Geist', 'Inter', system-ui, sans-serif;
+        position: relative;
+        overflow-x: hidden;
     }
 
-    :global(.mermaid) {
-        background: #0f172a !important;
-        padding: 2rem;
-        border-radius: 1rem;
-        margin: 2rem 0;
-        display: flex;
-        justify-content: center;
-        border: 1px solid #1e293b;
+    .bg-glow {
+        pointer-events: none;
+        position: fixed;
+        top: -30vh; left: 50%;
+        transform: translateX(-50%);
+        width: 900px; height: 600px;
+        background: radial-gradient(ellipse at center, rgba(109,90,205,0.12) 0%, transparent 70%);
+        z-index: 0;
     }
+
+    .container {
+        position: relative; z-index: 1;
+        max-width: 780px; margin: 0 auto;
+        padding: 0 1.5rem 6rem;
+    }
+
+    /* Nav */
+    nav { display: flex; align-items: center; justify-content: space-between; padding: 1.75rem 0 3rem; }
+    .nav-brand { display: flex; align-items: center; gap: 0.6rem; }
+    .nav-logo { width: 28px; height: 28px; background: linear-gradient(135deg, #6d5acd, #9b7ff0); border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 0.85rem; font-weight: 800; color: white; }
+    .nav-name { font-size: 1rem; font-weight: 700; color: #e8e6ff; letter-spacing: -0.02em; }
+    .nav-dot { color: #6d5acd; }
+    .nav-badge { display: flex; align-items: center; gap: 0.45rem; font-size: 0.72rem; color: #5a576e; font-weight: 500; }
+    .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: #3a3750; transition: all 0.3s; }
+    .badge-dot.pulse { background: #6d5acd; animation: badge-pulse 1.5s ease-out infinite; }
+    @keyframes badge-pulse { 0% { box-shadow: 0 0 0 0 rgba(109,90,205,0.5); } 70% { box-shadow: 0 0 0 6px rgba(109,90,205,0); } 100% { box-shadow: 0 0 0 0 rgba(109,90,205,0); } }
+
+    /* Hero */
+    .hero { margin-bottom: 2.5rem; }
+    .hero-eyebrow { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #6d5acd; margin-bottom: 1rem; }
+    .hero-title { font-size: clamp(2.2rem, 5vw, 3.2rem); font-weight: 800; color: #edeaf8; line-height: 1.12; letter-spacing: -0.03em; margin-bottom: 1.1rem; }
+    .hero-gradient { background: linear-gradient(120deg, #9b7ff0 0%, #c084fc 50%, #818cf8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .hero-sub { font-size: 0.98rem; color: #6b6880; line-height: 1.65; font-weight: 400; }
+    @media (max-width: 600px) { .hero-br { display: none; } }
+
+    /* Search */
+    .search-form { display: flex; gap: 0.6rem; margin-bottom: 0.75rem; }
+    .search-box { flex: 1; display: flex; align-items: center; gap: 0.6rem; background: #13121e; border: 1px solid #232133; border-radius: 10px; padding: 0 1rem; transition: border-color 0.2s, box-shadow 0.2s; }
+    .search-box.focused { border-color: #6d5acd; box-shadow: 0 0 0 3px rgba(109,90,205,0.12); }
+    .search-icon { color: #3d3a52; flex-shrink: 0; }
+    .search-box input { flex: 1; background: transparent; border: none; outline: none; color: #dbd8f5; font-family: 'Geist Mono', 'Fira Code', monospace; font-size: 0.875rem; padding: 0.95rem 0; }
+    .search-box input::placeholder { color: #2e2c42; }
+    .clear-btn { background: none; border: none; color: #3d3a52; cursor: pointer; padding: 0.25rem; display: flex; align-items: center; border-radius: 4px; transition: color 0.15s, background 0.15s; }
+    .clear-btn:hover { color: #9b7ff0; background: rgba(109,90,205,0.1); }
+    .analyze-btn { display: flex; align-items: center; gap: 0.5rem; background: #6d5acd; border: none; color: white; font-family: inherit; font-size: 0.875rem; font-weight: 600; padding: 0 1.4rem; border-radius: 10px; cursor: pointer; white-space: nowrap; transition: background 0.2s, transform 0.1s, box-shadow 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.3), 0 0 0 1px rgba(109,90,205,0.3); min-width: 108px; justify-content: center; min-height: 48px; }
+    .analyze-btn:hover:not(:disabled) { background: #7d6bdd; box-shadow: 0 4px 16px rgba(109,90,205,0.35); }
+    .analyze-btn:active:not(:disabled) { transform: scale(0.98); }
+    .analyze-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    /* Disclaimer */
+    .disclaimer { display: flex; align-items: center; gap: 0.4rem; font-size: 0.72rem; color: #3d3a52; margin-bottom: 2.5rem; }
+
+    /* Loading */
+    .loading-card { background: #13121e; border: 1px solid #1e1c2e; border-radius: 14px; padding: 1.75rem; margin-bottom: 1.5rem; }
+    .loading-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; }
+    .loading-steps { display: flex; flex-direction: column; gap: 0.6rem; }
+    .loading-step { display: flex; align-items: center; gap: 0.6rem; font-size: 0.78rem; color: #3d3a52; transition: color 0.3s; }
+    .loading-step.active { color: #c9c7e8; }
+    .loading-step.done { color: #5a576e; }
+    .step-indicator { width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .step-indicator svg { color: #6d5acd; }
+    .step-dot-pulse { width: 6px; height: 6px; border-radius: 50%; background: #6d5acd; animation: badge-pulse 1.2s ease-out infinite; display: block; }
+    .step-dot-idle { width: 5px; height: 5px; border-radius: 50%; background: #232133; border: 1px solid #2e2c42; display: block; }
+    .loading-visual { position: relative; width: 52px; height: 52px; flex-shrink: 0; }
+    .loading-ring { position: absolute; inset: 0; border-radius: 50%; border: 1.5px solid transparent; border-top-color: #6d5acd; animation: ring-spin 1.2s linear infinite; }
+    .ring-2 { inset: 8px; border-top-color: #9b7ff0; animation-duration: 1.8s; animation-direction: reverse; }
+    .ring-3 { inset: 16px; border-top-color: #c084fc; animation-duration: 2.4s; }
+    @keyframes ring-spin { to { transform: rotate(360deg); } }
+    .loading-bar-track { height: 2px; background: #1e1c2e; border-radius: 999px; overflow: hidden; }
+    @keyframes bar-sweep { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }
+    .loading-bar-fill { height: 100%; width: 30%; background: linear-gradient(90deg, transparent, #6d5acd, #c084fc, transparent); animation: bar-sweep 1.8s ease-in-out infinite; }
+
+    /* Error */
+    .error-card { display: flex; align-items: center; gap: 0.6rem; padding: 0.9rem 1.1rem; background: rgba(239,68,68,0.07); border: 1px solid rgba(239,68,68,0.2); border-radius: 10px; font-size: 0.84rem; color: #f87171; margin-bottom: 1.5rem; }
+
+    /* Toolbar */
+    .toolbar { display: flex; align-items: center; justify-content: space-between; padding: 0.6rem 0; margin-bottom: 0; flex-wrap: wrap; gap: 0.5rem; }
+    .toolbar-left { display: flex; align-items: center; gap: 0.6rem; }
+    .toolbar-right { display: flex; align-items: center; gap: 0.15rem; }
+    .toolbar-label { font-size: 0.72rem; font-weight: 600; color: #4a4760; text-transform: uppercase; letter-spacing: 0.08em; }
+    .chip { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.68rem; font-weight: 500; padding: 0.2rem 0.55rem; border-radius: 999px; border: 1px solid; }
+    .chip-green { color: #4ade80; border-color: rgba(74,222,128,0.25); background: rgba(74,222,128,0.07); }
+    .chip-yellow { color: #fbbf24; border-color: rgba(251,191,36,0.25); background: rgba(251,191,36,0.07); }
+    .tool-btn { display: flex; align-items: center; gap: 0.35rem; background: transparent; border: none; color: #5a576e; font-family: inherit; font-size: 0.75rem; font-weight: 500; padding: 0.4rem 0.65rem; border-radius: 6px; cursor: pointer; transition: color 0.15s, background 0.15s; white-space: nowrap; }
+    .tool-btn:hover { color: #c9c7e8; background: rgba(255,255,255,0.04); }
+    .divider-v { width: 1px; height: 16px; background: #1e1c2e; margin: 0 0.2rem; }
+
+    /* Report */
+    .report { background: #13121e; border: 1px solid #1e1c2e; border-radius: 0 0 14px 14px; border-top: none; padding: 2rem 2.25rem 2.5rem; margin-bottom: 2rem; }
+    .format-spinner { display: flex; justify-content: center; padding: 3rem; }
+
+    /* Prose */
+    :global(.prose) { color: #8b8799; font-size: 0.9rem; line-height: 1.8; font-family: 'Geist', system-ui, sans-serif; }
+    :global(.prose h2) { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #6d5acd; margin-top: 2.5rem; margin-bottom: 0.9rem; display: flex; align-items: center; gap: 0.5rem; }
+    :global(.prose h2::after) { content: ''; flex: 1; height: 1px; background: #1e1c2e; }
+    :global(.prose h3) { font-size: 0.88rem; font-weight: 600; color: #c9c7e8; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+    :global(.prose p) { margin-bottom: 0.85rem; }
+    :global(.prose strong) { color: #dbd8f5; font-weight: 600; }
+    :global(.prose a) { color: #9b7ff0; text-underline-offset: 3px; }
+    :global(.prose a:hover) { color: #c084fc; }
+    :global(.prose code) { font-family: 'Geist Mono', monospace; font-size: 0.8em; background: #1a1830; color: #a78bfa; padding: 0.15em 0.45em; border-radius: 4px; border: 1px solid #2a2740; }
+    :global(.prose pre) { background: #0c0b14 !important; border: 1px solid #1e1c2e; border-radius: 10px; padding: 1.25rem 1.5rem; overflow-x: auto; margin: 1.25rem 0; }
+    :global(.prose pre code) { background: none; border: none; padding: 0; color: #a78bfa; font-size: 0.82rem; }
+    :global(.prose ul, .prose ol) { padding-left: 1.4rem; margin-bottom: 0.85rem; }
+    :global(.prose li) { margin-bottom: 0.35rem; }
+    :global(.prose li::marker) { color: #3d3a52; }
+    :global(.prose blockquote) { border-left: 2px solid #6d5acd; padding-left: 1.1rem; margin-left: 0; color: #5a576e; font-style: italic; }
+    :global(.prose hr) { border: none; border-top: 1px solid #1e1c2e; margin: 1.5rem 0; }
+
+    /* Mermaid in report */
+    :global(.mermaid-wrap) { display: block; width: 100%; overflow-x: auto; background: #0c0b14; border: 1px solid #1e1c2e; border-radius: 10px; padding: 1.5rem; margin: 1.25rem 0; min-height: 60px; }
+    :global(.mermaid-ok) { display: block; width: 100%; transition: opacity 0.15s; }
+    :global(.mermaid-ok:hover) { opacity: 0.85; }
+    :global(.mermaid-ok svg) { display: block; width: 100% !important; max-width: 100%; height: auto !important; }
+    :global(.mermaid-loading) { color: #3d3a52; font-size: 0.75rem; display: block; padding: 0.5rem; }
+    :global(.mermaid-err) { padding: 0.5rem; }
+    :global(.mermaid-err p) { color: #f87171; font-size: 0.72rem; margin-bottom: 0.5rem; }
+    :global(.mermaid-err pre) { font-size: 0.68rem; color: #4a4760; white-space: pre-wrap; word-break: break-all; }
+
+    /* Zoom modal */
+    .zoom-backdrop { position: fixed; inset: 0; z-index: 1000; background: #0c0b18; display: flex; flex-direction: column; align-items: stretch; animation: fade-in 0.15s ease; }
+    @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+    .zoom-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1.25rem; background: #13121e; border-bottom: 1px solid #1e1c2e; flex-shrink: 0; z-index: 1; }
+    .zoom-label { font-size: 0.72rem; font-weight: 600; color: #4a4760; letter-spacing: 0.1em; text-transform: uppercase; }
+    .zoom-controls { display: flex; align-items: center; gap: 0.25rem; }
+    .zoom-pct { font-size: 0.72rem; font-weight: 600; color: #6d5acd; min-width: 3.5rem; text-align: center; font-family: 'Geist Mono', monospace; }
+    .zoom-ctrl-btn { background: transparent; border: 1px solid #1e1c2e; color: #5a576e; width: 30px; height: 30px; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.15s; }
+    .zoom-ctrl-btn:hover { color: #c9c7e8; background: rgba(255,255,255,0.05); border-color: #2e2c42; }
+    .zoom-ctrl-btn.reset:hover { color: #9b7ff0; }
+    .zoom-ctrl-btn.close:hover { color: #f87171; border-color: rgba(248,113,113,0.3); }
+    .zoom-stage { flex: 1; overflow: hidden; display: flex; align-items: center; justify-content: center; user-select: none; background-image: radial-gradient(circle, #2a2645 1px, transparent 1px); background-size: 28px 28px; background-color: #0c0b18; }
+    .zoom-content { will-change: transform; transition: transform 0.05s linear; max-width: 90vw; }
+    :global(.zoom-content svg) { display: block !important; width: auto !important; min-width: min(600px, 80vw); max-width: 82vw !important; height: auto !important; max-height: 72vh !important; filter: drop-shadow(0 0 40px rgba(109,90,205,0.15)); }
+    .zoom-hint { text-align: center; font-size: 0.68rem; color: #2e2c42; padding: 0.6rem; flex-shrink: 0; }
+
+    /* Features */
+    .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 2rem; }
+    @media (max-width: 640px) { .features { grid-template-columns: 1fr; } }
+    .feature-card { background: #13121e; border: 1px solid #1e1c2e; border-radius: 12px; padding: 1.4rem; transition: border-color 0.2s; }
+    .feature-card:hover { border-color: #2e2c42; }
+    .feature-icon { font-size: 1.3rem; margin-bottom: 0.75rem; color: #6d5acd; opacity: 0.7; }
+    .feature-title { font-size: 0.85rem; font-weight: 600; color: #c9c7e8; margin-bottom: 0.4rem; }
+    .feature-desc { font-size: 0.78rem; color: #4a4760; line-height: 1.6; }
+
+    /* Spinner */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin-ring { display: inline-block; width: 15px; height: 15px; border: 2px solid rgba(255,255,255,0.2); border-top-color: white; border-radius: 50%; animation: spin 0.65s linear infinite; }
 </style>
