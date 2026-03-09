@@ -113,4 +113,4 @@ GitHub data is fetched without authentication — public repos only. The file tr
 
 ## License
 
-MIT
+Apache License 2.0
