@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="gA" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6d5acd"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="gB" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#9b7ff0"/>
+      <stop offset="100%" stop-color="#c084fc"/>
+    </linearGradient>
+    <radialGradient id="glow-fill" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#b49fff"/>
+      <stop offset="100%" stop-color="#6d5acd"/>
+    </radialGradient>
+    <filter id="soft-glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="inner-glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="50" cy="50" r="48" fill="#0e0d1a"/>
+
+  <!-- Ambient glow behind icon -->
+  <circle cx="50" cy="50" r="28" fill="#6d5acd" opacity="0.12" filter="url(#inner-glow)"/>
+
+  <!-- Outer hex ring -->
+  <polygon
+    points="50,8 84.6,29 84.6,71 50,92 15.4,71 15.4,29"
+    fill="none"
+    stroke="url(#gA)"
+    stroke-width="1.2"
+    opacity="0.3"
+  />
+
+  <!-- Mid hex ring, rotated 30deg -->
+  <polygon
+    points="50,18 75.98,33 75.98,67 50,82 24.02,67 24.02,33"
+    fill="none"
+    stroke="url(#gB)"
+    stroke-width="1"
+    opacity="0.45"
+    transform="rotate(30 50 50)"
+  />
+
+  <!-- Tick marks at outer hex vertices -->
+  <line x1="50" y1="8"    x2="50" y2="15"    stroke="#6d5acd" stroke-width="1.5" opacity="0.6"/>
+  <line x1="84.6" y1="29" x2="78.5" y2="32.5" stroke="#6d5acd" stroke-width="1.5" opacity="0.6"/>
+  <line x1="84.6" y1="71" x2="78.5" y2="67.5" stroke="#6d5acd" stroke-width="1.5" opacity="0.6"/>
+  <line x1="50" y1="92"   x2="50" y2="85"    stroke="#6d5acd" stroke-width="1.5" opacity="0.6"/>
+  <line x1="15.4" y1="71" x2="21.5" y2="67.5" stroke="#6d5acd" stroke-width="1.5" opacity="0.6"/>
+  <line x1="15.4" y1="29" x2="21.5" y2="32.5" stroke="#6d5acd" stroke-width="1.5" opacity="0.6"/>
+
+  <!-- Inner filled hex -->
+  <polygon
+    points="50,28 67.3,38 67.3,62 50,72 32.7,62 32.7,38"
+    fill="url(#glow-fill)"
+    opacity="0.92"
+    filter="url(#soft-glow)"
+  />
+
+  <!-- Inner hex border -->
+  <polygon
+    points="50,28 67.3,38 67.3,62 50,72 32.7,62 32.7,38"
+    fill="none"
+    stroke="#c084fc"
+    stroke-width="0.8"
+    opacity="0.6"
+  />
+
+  <!-- Diagonal cross lines inside inner hex -->
+  <line x1="50" y1="28" x2="67.3" y2="62" stroke="white" stroke-width="0.7" opacity="0.15"/>
+  <line x1="50" y1="28" x2="32.7" y2="62" stroke="white" stroke-width="0.7" opacity="0.15"/>
+  <line x1="32.7" y1="38" x2="67.3" y2="62" stroke="white" stroke-width="0.7" opacity="0.12"/>
+  <line x1="67.3" y1="38" x2="32.7" y2="62" stroke="white" stroke-width="0.7" opacity="0.12"/>
+  <line x1="32.7" y1="38" x2="67.3" y2="38" stroke="white" stroke-width="0.7" opacity="0.12"/>
+  <line x1="32.7" y1="62" x2="67.3" y2="62" stroke="white" stroke-width="0.7" opacity="0.12"/>
+
+  <!-- Center dot -->
+  <circle cx="50" cy="50" r="5.5" fill="white" opacity="0.95" filter="url(#soft-glow)"/>
+  <circle cx="50" cy="50" r="2.5" fill="#6d5acd"/>
+
+  <!-- Outer border ring -->
+  <circle cx="50" cy="50" r="48" fill="none" stroke="#1e1c2e" stroke-width="1.5"/>
+</svg>

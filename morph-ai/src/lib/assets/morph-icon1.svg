@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="gA" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6d5acd"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+    <radialGradient id="gFill" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#b49fff"/>
+      <stop offset="100%" stop-color="#6d5acd"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Outer hex ring -->
+  <polygon
+    points="50,6 84.6,27 84.6,73 50,94 15.4,73 15.4,27"
+    fill="none"
+    stroke="#7c6ee0"
+    stroke-width="2.5"
+    opacity="0.5"
+  />
+
+  <!-- Mid hex ring rotated -->
+  <polygon
+    points="50,18 75.98,33 75.98,67 50,82 24.02,67 24.02,33"
+    fill="none"
+    stroke="#9b7ff0"
+    stroke-width="1.5"
+    opacity="0.5"
+    transform="rotate(30 50 50)"
+  />
+
+  <!-- Inner filled hex -->
+  <polygon
+    points="50,28 67.3,38 67.3,62 50,72 32.7,62 32.7,38"
+    fill="url(#gFill)"
+  />
+
+  <!-- Center dot -->
+  <circle cx="50" cy="50" r="7" fill="white" opacity="0.95"/>
+  <circle cx="50" cy="50" r="3.5" fill="#6d5acd"/>
+</svg>

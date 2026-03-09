@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="gA" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6d5acd"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="gB" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#9b7ff0"/>
+      <stop offset="100%" stop-color="#c084fc"/>
+    </linearGradient>
+    <radialGradient id="glow-fill" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#b49fff"/>
+      <stop offset="100%" stop-color="#6d5acd"/>
+    </radialGradient>
+    <filter id="soft-glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="inner-glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="50" cy="50" r="48" fill="#0e0d1a"/>
+
+  <!-- Ambient glow behind icon -->
+  <circle cx="50" cy="50" r="28" fill="#6d5acd" opacity="0.12" filter="url(#inner-glow)"/>
+
+  <!-- Outer hex ring -->
+  <polygon
+    points="50,8 84.6,29 84.6,71 50,92 15.4,71 15.4,29"
+    fill="none"
+    stroke="url(#gA)"
+    stroke-width="1.2"
+    opacity="0.3"
+  />
+
+  <!-- Mid hex ring, rotated 30deg -->
+  ...existing code...
+</svg>
