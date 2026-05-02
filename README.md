@@ -104,7 +104,7 @@ src/
 
 1. User pastes a GitHub URL and clicks **Analyze**
 2. The server action fetches the repo's README and full file tree via the GitHub API
-3. Both are sent to Gemini 2.5 Flash with a structured prompt
+3. Both are sent to Gemini 3.0 Flash with a structured prompt
 4. The response is rendered as markdown with Mermaid diagrams parsed and rendered client-side
 
 GitHub data is fetched without authentication — public repos only. The file tree is capped at 1500 entries and the README at 6000 characters to stay within token limits.
