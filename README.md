@@ -1,10 +1,9 @@
 <div align="center">
-
 <br />
-
 <img src="morph-ai/src/lib/assets/morph-icon1.svg" alt="morph.ai" width="200" />
-
 <br />
+</div>
+
 
 # morph.ai
 
