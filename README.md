@@ -1,3 +1,11 @@
+<div align="center">
+
+<br />
+
+<img src="morph-ai/src/lib/assets/morph-icon1.svg" alt="morph.ai" width="200" />
+
+<br />
+
 # morph.ai
 
 **Architectural Intelligence Engine** — paste a GitHub URL, get a complete technical breakdown of any codebase instantly.
